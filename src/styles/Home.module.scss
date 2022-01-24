@@ -1,0 +1,10 @@
+.container {
+  display: flex;
+  margin-top: 50vh;
+  margin-bottom: 50vh;
+  font-family: "Roboto";
+  flex-direction: column;
+  * {
+    margin: auto;
+  }
+}
