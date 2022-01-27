@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useEffect, useState } from "react";
 import { api } from "../services/api";
 import Router from "next/router";
-import { setCookie, parseCookies } from "nookies";
+import { setCookie, parseCookies, destroyCookie } from "nookies";
 
 type User = {
   email: string;
@@ -34,11 +34,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const { "igniteauth.token": token } = parseCookies();
 
     if (token) {
-      api.get("/me").then((res) => {
-        const { email, permissions, roles } = res.data;
+      api
+        .get("/me")
+        .then((res) => {
+          const { email, permissions, roles } = res.data;
 
-        setUser({ email, permissions, roles });
-      });
+          setUser({ email, permissions, roles });
+        })
+        .catch((error) => {
+          destroyCookie(undefined, "igniteauth.token");
+          destroyCookie(undefined, "igniteauth.refreshToken");
+
+          Router.push("/");
+        });
     }
   }, []);
 
