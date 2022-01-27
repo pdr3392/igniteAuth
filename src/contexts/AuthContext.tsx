@@ -26,6 +26,13 @@ type AuthProviderProps = {
 
 export const AuthContext = createContext({} as AuthContextData);
 
+export function signOut() {
+  destroyCookie(undefined, "igniteauth.token");
+  destroyCookie(undefined, "igniteauth.refreshToken");
+
+  Router.push("/");
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User>();
   const isAuthenticated = !!user;
@@ -41,11 +48,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
           setUser({ email, permissions, roles });
         })
-        .catch((error) => {
-          destroyCookie(undefined, "igniteauth.token");
-          destroyCookie(undefined, "igniteauth.refreshToken");
-
-          Router.push("/");
+        .catch(() => {
+          signOut();
         });
     }
   }, []);
