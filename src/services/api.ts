@@ -1,89 +1,103 @@
 import axios, { AxiosError } from "axios";
 import { parseCookies, setCookie } from "nookies";
 import { signOut } from "../contexts/AuthContext";
+import { AuthTokenError } from "./errors/AuthTokenError";
 
-let cookies = parseCookies();
 let isRefreshing = false;
 let failedRequestsQueue = [];
 
-export const api = axios.create({
-  baseURL: "http://localhost:3333",
-  headers: {
-    Authorization: `Bearer ${cookies["igniteauth.token"]}`,
-  },
-});
+export function setupApiClient(context = undefined) {
+  let cookies = parseCookies(context);
 
-api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
-  (error: AxiosError) => {
-    if (error.response.status === 401) {
-      if (error.response.data?.code === "token.expired") {
-        cookies = parseCookies();
+  const api = axios.create({
+    baseURL: "http://localhost:3333",
+    headers: {
+      Authorization: `Bearer ${cookies["igniteauth.token"]}`,
+    },
+  });
 
-        const { "igniteauth.refreshToken": refreshToken } = cookies;
+  api.interceptors.response.use(
+    (response) => {
+      return response;
+    },
+    (error: AxiosError) => {
+      if (error.response.status === 401) {
+        if (error.response.data?.code === "token.expired") {
+          cookies = parseCookies(context);
 
-        const originalConfig = error.config;
+          const { "igniteauth.refreshToken": refreshToken } = cookies;
 
-        if (!isRefreshing) {
-          isRefreshing = true;
+          const originalConfig = error.config;
 
-          api
-            .post("/refresh", {
-              refreshToken,
-            })
-            .then((res) => {
-              const { token } = res.data;
+          if (!isRefreshing) {
+            isRefreshing = true;
 
-              setCookie(undefined, "igniteauth.token", token, {
-                maxAge: 60 * 60 * 24 * 30, // 30 days
-                path: "/",
-              });
-              setCookie(
-                undefined,
-                "igniteauth.refreshToken",
-                res.data.refreshToken,
-                {
+            api
+              .post("/refresh", {
+                refreshToken,
+              })
+              .then((res) => {
+                const { token } = res.data;
+
+                setCookie(context, "igniteauth.token", token, {
                   maxAge: 60 * 60 * 24 * 30, // 30 days
                   path: "/",
+                });
+                setCookie(
+                  context,
+                  "igniteauth.refreshToken",
+                  res.data.refreshToken,
+                  {
+                    maxAge: 60 * 60 * 24 * 30, // 30 days
+                    path: "/",
+                  }
+                );
+
+                api.defaults.headers["Authorization"] = `Bearer ${token}`;
+
+                failedRequestsQueue.forEach((request) =>
+                  request.onSuccess(token)
+                );
+                failedRequestsQueue = [];
+              })
+              .catch((error) => {
+                failedRequestsQueue.forEach((request) =>
+                  request.onFailure(error)
+                );
+                failedRequestsQueue = [];
+
+                if (process.browser) {
+                  signOut();
                 }
-              );
+              })
+              .finally(() => {
+                isRefreshing = false;
+              });
+          }
 
-              api.defaults.headers["Authorization"] = `Bearer ${token}`;
+          return new Promise((resolve, reject) => {
+            failedRequestsQueue.push({
+              onSuccess: (token: string) => {
+                originalConfig.headers["Authorization"] = `Bearer ${token}`;
 
-              failedRequestsQueue.forEach((request) =>
-                request.onSuccess(token)
-              );
-              failedRequestsQueue = [];
-            })
-            .catch((error) => {
-              failedRequestsQueue.forEach((request) =>
-                request.onFailure(error)
-              );
-              failedRequestsQueue = [];
-            })
-            .finally(() => {
-              isRefreshing = false;
+                resolve(api(originalConfig));
+              },
+              onFailure: (error: AxiosError) => {
+                reject(error);
+              },
             });
-        }
-
-        return new Promise((resolve, reject) => {
-          failedRequestsQueue.push({
-            onSuccess: (token: string) => {
-              originalConfig.headers["Authorization"] = `Bearer ${token}`;
-
-              resolve(api(originalConfig));
-            },
-            onFailure: (error: AxiosError) => {
-              reject(error);
-            },
           });
-        });
-      } else {
-        signOut();
+        } else {
+          if (process.browser) {
+            signOut();
+          } else {
+            return Promise.reject(new AuthTokenError());
+          }
+        }
       }
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
-);
+  );
+
+  return api;
+}
